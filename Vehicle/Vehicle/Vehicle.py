@@ -58,7 +58,7 @@ class Vec2:
 
 
 class Vehicle:
-    def __init__(self, pos_x, pos_y, index, cell_size_x = 100, cell_size_y = 100, dimension_x = 20, dimension_y = 20, v = 100):
+    def __init__(self, pos_x, pos_y, index, cell_size_x = 100, cell_size_y = 100, dimension_x = 20, dimension_y = 20, v = 40):
        
         # Index of the vehicle (for separate connections).
         self.index = index
@@ -69,6 +69,27 @@ class Vehicle:
 
         # Goal position in coordinates.
         self.goal = Vec2(pos_x, pos_y)
+        
+        # Sockets for transmitting position information and receiving destinations.
+        self.sender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sender.settimeout(None)
+        while True:
+            try:
+                self.sender.connect(('127.0.0.1', 500 + self.index))
+            except socket.error as e:
+                print(self.index, end=': ')
+                print(e)
+                continue           
+            break        
+        
+        # Receive pos and goal from socket.
+        self.receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.receiver.bind(('127.0.0.1', 100 + self.index))
+        self.receiver_thread = threading.Thread(target=self.receiver_function)
+
+       
+        self.receiver_thread.start()
+        self.receiver_thread.join()
 
         # Path in cells.
         self.cell_size = Vec2(cell_size_x, cell_size_y)
@@ -78,39 +99,20 @@ class Vehicle:
 
         self.dimensions = Vec2(dimension_x, dimension_y)
 
-        # Sockets for transmitting position information and receiving destinations.
-        self.sender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        while True:
-            try:
-                self.sender.connect(('127.0.0.1', 500 + self.index))
-            except socket.error as e:
-                print(self.index, end=': ')
-                print(e)
-                continue           
-            break
-        
-        self.sender.send(pickle.dumps([self.pos.x, self.pos.y])) # Send initial position.
-
-        self.receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.receiver.bind(('127.0.0.1', 100 + self.index))
-        self.receiver_thread = threading.Thread(target=self.receiver_function)
-
-        self.peer = peer.Peer(self.index) # Create peer in case receiver receives immediately.
-       
-        self.receiver_thread.start()
-        
-        # Peer object for V2V communication.
-
         self.rent_thread = threading.Thread()
         self.time_per_cell = 3
         self.start_time = 0
         self.end_time = 0
 
+        # Peer object for V2V communication.
+        self.peer = peer.Peer(self.index)
+
         self.done = True
         self.rent_done = False
 
-
+        print(self.pos)
+        self.create_path(self.goal.x, self.goal.y)
+    
     def receiver_function(self):
         while True:
             self.receiver.listen()
@@ -126,12 +128,13 @@ class Vehicle:
 
                     # Set a position and create a path from the received message.
                     self.pos = Vec2(message[0], message[1])
-                    self.create_path(message[2], message[3])
-                    self.sender.send(pickle.dumps([self.pos.x, self.pos.y]))
-
+                    self.goal = Vec2(message[2], message[3])
+                    self.sender.sendall(pickle.dumps([self.pos.x, self.pos.y]))  
+                    
                     conn.close()
                     break  
-
+                break
+            break
     # Reset function for when a vehicle has reached their goal.
     def reset(self):
         self.goal = Vec2(self.pos.x, self.pos.y)
@@ -148,13 +151,11 @@ class Vehicle:
 
         # Do not update until renting is complete.
         if self.rent_thread.is_alive():
-            self.rent_done = True
-            return
+            return       
 
-        # Set the done bool.
-        if self.rent_done:
-            self.done = False
-            self.rent_done = False        
+        # Do not move if 'done'
+        if self.done:
+            return
 
         # Set the start and end time as well as path.
         if self.start_time == 0:
@@ -174,8 +175,9 @@ class Vehicle:
 
         # Move and transmit positional information.
         self.move(dt)        
-        self.sender.send(pickle.dumps([self.pos.x, self.pos.y]))
-
+        #print(self.pos)
+        self.sender.sendall(pickle.dumps([self.pos.x, self.pos.y]))
+    
 
     # Move towards goal, adjust movement if outside of path.
     def move(self, dt):        
@@ -188,14 +190,6 @@ class Vehicle:
         diff = self.goal - self.pos
 
         dist_to_goal = diff.length()
-
-        if dist_to_goal < 0.1:
-            for cell in self.path:
-                self.peer.free_nodes.append([cell.x, cell.y, 0])
-                del self.path[self.path.index(cell)]
-            self.done = True
-            self.reset()
-            return
 
         cos = diff.x / dist_to_goal
         sin = diff.y / dist_to_goal
@@ -210,6 +204,14 @@ class Vehicle:
         
         self.adjust_movement(mvmt.x, mvmt.y)
 
+        if dist_to_goal < 0.1:
+            for cell in self.path:
+                self.peer.free_nodes.append([cell.x, cell.y, 0])
+                del self.path[self.path.index(cell)]
+            self.done = True
+            self.reset()
+            return
+        
         # Check if vehicle has fully entered the next node in the path.
         bl = Vec2(self.pos.x - self.dimensions.x, self.pos.y - self.dimensions.y)
         br = Vec2(self.pos.x + self.dimensions.x, self.pos.y - self.dimensions.y)
@@ -230,8 +232,10 @@ class Vehicle:
                 free_node = [self.path[0].x, self.path[0].y, 0]
                 self.peer.free_nodes.append(free_node)
                 del self.path[0]
-                self.cell.x = self.path[0].x
-                self.cell.y = self.path[0].y
+
+                if len(self.path) != 0:
+                    self.cell.x = self.path[0].x
+                    self.cell.y = self.path[0].y
     
     # Adjust movement if current position intersects a cell not in the path.
     def adjust_movement(self, mvmt_x, mvmt_y):

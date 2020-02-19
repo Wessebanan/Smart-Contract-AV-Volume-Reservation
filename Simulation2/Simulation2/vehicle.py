@@ -36,14 +36,15 @@ class GraphicalVehicle:
                 conn, addr = self.receiver.accept()                
                 while True:
                     data = conn.recv(4096)
-                    if not data:
-                        break
-                    message = pickle.loads(data)
-
-                    # Move circle to where the vehicle currently is.
-                    self.mvmt_x = message[0] - self.circle.getCenter().getX()
-                    self.mvmt_y = message[1] - self.circle.getCenter().getY()                                      
+                    length = len(data)
+                    if length == 26:
+                        #break
+                        message = pickle.loads(data)
+                        #print(message)
+                        # Move circle to where the vehicle currently is.
+                        self.mvmt_x = message[0] - self.circle.getCenter().getX()
+                        self.mvmt_y = message[1] - self.circle.getCenter().getY()                                      
                     
-                    conn.close()
-                    break  
+                    #conn.close()
+                    #break  
 

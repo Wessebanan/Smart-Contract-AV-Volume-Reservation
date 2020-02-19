@@ -83,7 +83,9 @@ class Peer:
     def message(self, sockname, message):    
         try:
             self.client.connect(sockname)  
-        except:
+        except socket.error as e:
+            print(e)
+            #print('VEHICLE TRIED TO CONNECT TO OTHER VEHICLE OOPSIE POOPSIE')
             return
         message.insert(0, self.index)
         self.client.send(pickle.dumps(message)) 
@@ -120,7 +122,10 @@ class Peer:
         owner_sockname = self.web3contract.sockname_from_address(owner_address)
         self.message(owner_sockname, [x, y, z, True])
         
-        response = self.client.recv(1024)
+        try:
+            response = self.client.recv(1024)
+        except:
+            return False
 
         self.client.close()
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -169,7 +174,7 @@ class Peer:
             if available:
                 # Rent path.
                 rented = True
-                
+                print('Trying to rent...')
                 for cell in path:
                     x = int(cell.x)
                     y = int(cell.y)
@@ -180,18 +185,23 @@ class Peer:
                     if self.web3contract.contract.functions.CheckAvailable(x, y, z).call():
                         if self.web3contract.rent_node(x, y, z, abs(seconds)):
                             rented_path.append(cell)
+                            print('Rented: ' + str(cell))
                         else:
                             cell_success = False
 
                     # Attempt exchange if not available.
                     elif self.exchange(x, y, z, seconds):
-                        rented_path.append(cell)   
+                        rented_path.append(cell)
+                        print('Exchanged: ' + str(cell))
                     # Stop if failure.
                     else:
                         cell_success = False
                     
                     # Return rented nodes if any node in path fails.
                     if not cell_success:
+                        print('Failed to rent: ' + str(cell))
+                        sockname =  contracts.sockname_from_address(self.web3contract.contract.GetOwner(x,y,z))
+                        print('Owner is: ' + color_mapping[int(sockname()[0][len(sockname()[0])-1]) - 1])
                         self.return_nodes(rented_path)
                         rented_path.clear()
                         break

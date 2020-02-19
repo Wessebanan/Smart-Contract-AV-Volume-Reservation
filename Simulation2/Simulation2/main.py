@@ -35,7 +35,7 @@ def spawn_vehicles(sim, amount):
                 continue           
             break
         
-        sock.send(pickle.dumps([start_x, start_y, goal_x, goal_y]))
+        sock.sendall(pickle.dumps([start_x, start_y, goal_x, goal_y]))
         sock.close()
 
         i+=1
@@ -46,25 +46,20 @@ def main():
     size_y = 1000
     grid_size_x = 10
     grid_size_y = 10   
+
+    sim = simulation.Simulation(size_x, size_y, grid_size_x, grid_size_y)
     
-    frame_rate = 100
-    frame_time = 1/frame_rate
+    spawn_vehicles(sim, 1)
 
-    sim = simulation.Simulation(size_x, size_y, grid_size_x, grid_size_y, frame_rate)
+    frame_time = 0.001
     
-    spawn_vehicles(sim, 10)
-
-    start_time = time.time()
-
     while True:
+        frame_start = time.time()
+        if frame_time == 0:
+            continue
         sim.update(frame_time)
-
-        elapsed_time = time.time() - start_time
-
-        if elapsed_time > 10.0:
-            start_time = time.time()
-            #spawn_vehicles(sim, 1)
-
+        frame_end = time.time()
+        frame_time = frame_end - frame_start
         if not sim.open:
             break
     
