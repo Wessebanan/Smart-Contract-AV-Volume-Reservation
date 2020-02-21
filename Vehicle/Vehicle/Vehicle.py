@@ -107,10 +107,10 @@ class Vehicle:
         # Peer object for V2V communication.
         self.peer = peer.Peer(self.index)
 
-        self.done = True
+        self.done = False
         self.rent_done = False
 
-        print(self.pos)
+        #print(self.pos)
         self.create_path(self.goal.x, self.goal.y)
     
     def receiver_function(self):
@@ -124,7 +124,8 @@ class Vehicle:
                         break
                     message = pickle.loads(data)
 
-                    print(message)
+                    #print('Vehicle received: ',end='')
+                    #print(message)
 
                     # Set a position and create a path from the received message.
                     self.pos = Vec2(message[0], message[1])
@@ -175,9 +176,12 @@ class Vehicle:
 
         # Move and transmit positional information.
         self.move(dt)        
-        #print(self.pos)
-        self.sender.sendall(pickle.dumps([self.pos.x, self.pos.y]))
-    
+        
+        message = pickle.dumps([self.pos.x, self.pos.y])       
+        sent = self.sender.send(pickle.dumps([self.pos.x, self.pos.y]))
+        #print('Vehicle sent: ',end='')
+        #print(pickle.loads(message[:sent]))
+        self.sender.recv(1024)        
 
     # Move towards goal, adjust movement if outside of path.
     def move(self, dt):        
@@ -200,9 +204,15 @@ class Vehicle:
         mvmt.x = sign(mvmt.x) * min(abs(mvmt.x), abs(self.goal.x - self.pos.x))
         mvmt.y = sign(mvmt.y) * min(abs(mvmt.y), abs(self.goal.y - self.pos.y))
 
+        pos_copy = Vec2(self.pos.x, self.pos.y)
+
         self.pos = self.pos + mvmt
         
         self.adjust_movement(mvmt.x, mvmt.y)
+
+        final_mvmt = self.pos - pos_copy
+        #print('Vehicle moved: ',end='')
+        #print(final_mvmt)
 
         if dist_to_goal < 0.1:
             for cell in self.path:
@@ -308,6 +318,7 @@ class Vehicle:
         
         # Attempt to rent the calculated path.
         self.rent_thread = threading.Thread(target=self.peer.rent_path, args=(self.rented_path, self.path, self.time_per_cell * len(self.path),))
+        self.rent_thread.daemon = True
         self.rent_thread.start()      
 
         return self.path   

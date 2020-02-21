@@ -8,7 +8,7 @@ class GraphicalVehicle:
         self.win = win
         self.index = index
         
-        self.circle = graphics.Circle(graphics.Point(0, 0), 20)
+        self.circle = graphics.Circle(graphics.Point(-20, -20), 20)
         self.circle.setWidth(5)
         self.circle.setFill(color)
         self.circle.draw(self.win)        
@@ -19,15 +19,28 @@ class GraphicalVehicle:
         self.receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.receiver.bind(('127.0.0.1', 500 + self.index))
         self.receiver_thread = threading.Thread(target=self.receiver_function)
+        self.receiver_thread.daemon = True
         self.receiver_thread.start()
-        self.mvmt_x = 0
-        self.mvmt_y = 0
+
+        self.condition = threading.Condition()
+
+        self.pos_queue = []    
 
     def update(self):
-        if self.mvmt_x != 0 or self.mvmt_y != 0:
-            self.circle.move(self.mvmt_x, self.mvmt_y)
-            self.mvmt_x = 0
-            self.mvmt_y = 0
+        #print(len(self.pos_queue))
+        if len(self.pos_queue) != 0:
+            pos = self.pos_queue[0]
+            mvmt_x = pos[0] - self.circle.getCenter().getX()
+            mvmt_y = pos[1] - self.circle.getCenter().getY()
+
+            self.circle.move(mvmt_x, mvmt_y)
+            #print('Sim Vehicle moved: ',end='')
+            #print([mvmt_x, mvmt_y])
+            del self.pos_queue[0]
+        else:
+            self.condition.acquire()
+            self.condition.notify()
+            self.condition.release()
 
     def receiver_function(self):
         while True:
@@ -35,16 +48,25 @@ class GraphicalVehicle:
             while True:
                 conn, addr = self.receiver.accept()                
                 while True:
-                    data = conn.recv(4096)
+                    try:
+                        data = conn.recv(4096)
+                        conn.send(b'1')            
+                    except:
+                        return
                     length = len(data)
-                    if length == 26:
-                        #break
+                    if length == 26:                        
                         message = pickle.loads(data)
+                        #print('Sim received: ',end='')
                         #print(message)
-                        # Move circle to where the vehicle currently is.
-                        self.mvmt_x = message[0] - self.circle.getCenter().getX()
-                        self.mvmt_y = message[1] - self.circle.getCenter().getY()                                      
-                    
-                    #conn.close()
-                    #break  
+                        
+                        # Queue movement.
+                        self.condition.acquire()
+                        self.condition.wait()
+                        self.condition.release()
+                                                    
+                        pos_x = message[0]
+                        pos_y = message[1]
+                        self.pos_queue.append([pos_x, pos_y])
+                        
+                        
 

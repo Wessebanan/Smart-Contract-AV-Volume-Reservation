@@ -3,6 +3,7 @@ import time
 import simulation
 import socket
 import pickle
+import threading
 
 random.seed(time.time())
 
@@ -40,7 +41,13 @@ def spawn_vehicles(sim, amount):
 
         i+=1
 
+def thread_counter():
+    while True:
+        print(threading.active_count())
+
 def main():
+    #threading.Thread(target=thread_counter).start()
+
     # Create window and set coordinate system.
     size_x = 1000
     size_y = 1000
@@ -49,18 +56,18 @@ def main():
 
     sim = simulation.Simulation(size_x, size_y, grid_size_x, grid_size_y)
     
-    spawn_vehicles(sim, 1)
+    spawn_vehicles(sim, 4)
 
-    frame_time = 0.001
+    frame_time = 0
+    frame_start = time.time()
     
     while True:
-        frame_start = time.time()
-        if frame_time == 0:
-            continue
-        sim.update(frame_time)
-        frame_end = time.time()
-        frame_time = frame_end - frame_start
-        if not sim.open:
+        if frame_time < 1 / 30:
+            frame_time = time.time() - frame_start
+        else:
+            sim.update(frame_time)
+            frame_start = time.time()  
+        if not sim.open:            
             break
     
 main()

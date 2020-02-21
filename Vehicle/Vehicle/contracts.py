@@ -11,7 +11,7 @@ class Web3Contract:
         self.web3.eth.defaultAccount = self.web3.eth.accounts[index]
 
         cd_path = os.path.dirname(__file__)
-        file_path = os.path.join(cd_path, 'RentSpatialNode.json')
+        file_path = os.path.join(cd_path, '../../RentSpatialNode.json')
  
         with open(file_path) as f:
             abi = json.load(f)

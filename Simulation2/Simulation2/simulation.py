@@ -33,7 +33,7 @@ class Simulation:
         # Window
         self.win_size_x = win_size_x
         self.win_size_y = win_size_y
-        self.win = graphics.GraphWin("Grid", win_size_x, win_size_y, autoflush=False)
+        self.win = graphics.GraphWin("Grid", win_size_x, win_size_y)
         self.win.setCoords(0, 0, win_size_x, win_size_y)
         self.win.setBackground("white")
         
@@ -52,16 +52,17 @@ class Simulation:
 
         # Misc
         self.vehicles = []
+        self.vehicle_threads = []
 
         self.open = True   
 
         # Contract (for coloring)
         url = "http://127.0.0.1:8545"
-        address = '0x243b5730647c70796cc6FdeC868bCCA7d199614f'
+        address = '0xf556B1FD9Eb18cb8E3ad3BfdF1Bb069359fC38b5'
         self.web3 = Web3(Web3.HTTPProvider(url))
 
         cd_path = os.path.dirname(__file__)
-        file_path = os.path.join(cd_path, 'RentSpatialNode.json')
+        file_path = os.path.join(cd_path, '../../RentSpatialNode.json')
  
         with open(file_path) as f:
             abi = json.load(f)
@@ -69,6 +70,7 @@ class Simulation:
 
         # Color mapping (grid)
         self.color_thread = threading.Thread(target=self.find_colors_from_contract)
+        self.color_thread.daemon = True
         self.color_thread.start()
 
     def find_colors_from_contract(self):
@@ -85,12 +87,14 @@ class Simulation:
                         if not self.color_grid[x][y].color == color:
                             self.color_grid[x][y].color = color_mapping[index]
                             self.color_grid[x][y].changed = True
+                    elif not self.color_grid[x][y].color == "white":
+                        self.color_grid[x][y].color = "white"
+                        self.color_grid[x][y].changed = True
+
                     y = y + 1
                 x = x + 1
             
     def update(self, dt):
-
-        graphics.update(dt**-1)
 
         if self.win.isClosed():
             self.open = False
@@ -109,8 +113,9 @@ class Simulation:
             self.vehicles.append(vehicle.GraphicalVehicle(n_vehicles, color_mapping[n_vehicles], self.win))
 
             # Fire up a new instance of the vehicle program.
-            threading.Thread(target=os.system, args=('cmd /c python ../../Vehicle/Vehicle/main.py ' + str(n_vehicles),)).start()
-            
+            self.vehicle_threads.append(threading.Thread(target=os.system, args=('cmd /c python ../../Vehicle/Vehicle/main.py ' + str(n_vehicles),)))
+            self.vehicle_threads[len(self.vehicle_threads)-1].daemon = True
+            self.vehicle_threads[len(self.vehicle_threads)-1].start()
     
     def init_grid(self):        
         rect_size_x = math.floor(self.win_size_x / self.grid_size_x)

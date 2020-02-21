@@ -9,29 +9,21 @@ random.seed(time.time())
 
 def main(args):
     
-    i = int(args[1])
-    print('----------------\nVEHICLE INDEX: ' + str(i) + '\n----------------')
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    #while True:
-    #    try:
-    #        server.bind(('127.0.0.' + str(i + 1), i + 1))
-    #    except:
-    #        i = i + 1
-    #        continue
-    #    
-    #    server.close()
-    #    break
+    i = int(args[1])  
 
     vehicle = Vehicle.Vehicle(0, 0, i)
 
     frame_time = 0
-    
+    frame_start = time.time()
+
     while True:
-        frame_start = time.time()
-        vehicle.update(frame_time)
-        frame_end = time.time()
-        frame_time = frame_end - frame_start
+        if vehicle.done:
+            break
+        if frame_time < 1 / 30:
+            frame_time = time.time() - frame_start
+        else:
+            vehicle.update(frame_time)
+            frame_start = time.time()       
 
 
 if __name__ == '__main__':
