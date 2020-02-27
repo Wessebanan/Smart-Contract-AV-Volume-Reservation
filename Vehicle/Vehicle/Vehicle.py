@@ -56,9 +56,8 @@ class Vec2:
     def __repr__(self):
         return '(' + str(self.x) + ', ' + str(self.y) + ')'    
 
-
 class Vehicle:
-    def __init__(self, pos_x, pos_y, index, cell_size_x = 100, cell_size_y = 100, dimension_x = 20, dimension_y = 20, v = 40):
+    def __init__(self, pos_x, pos_y, index, cell_size_x = 100, cell_size_y = 100, dimension_x = 20, dimension_y = 20, v = 10):
        
         # Index of the vehicle (for separate connections).
         self.index = index
@@ -100,7 +99,7 @@ class Vehicle:
         self.dimensions = Vec2(dimension_x, dimension_y)
 
         self.rent_thread = threading.Thread()
-        self.time_per_cell = 3
+        self.time_per_cell = 30
         self.start_time = 0
         self.end_time = 0
 
@@ -110,7 +109,6 @@ class Vehicle:
         self.done = False
         self.rent_done = False
 
-        #print(self.pos)
         self.create_path(self.goal.x, self.goal.y)
     
     def receiver_function(self):
@@ -123,10 +121,7 @@ class Vehicle:
                     if not data:
                         break
                     message = pickle.loads(data)
-
-                    #print('Vehicle received: ',end='')
-                    #print(message)
-
+                    
                     # Set a position and create a path from the received message.
                     self.pos = Vec2(message[0], message[1])
                     self.goal = Vec2(message[2], message[3])
@@ -139,7 +134,7 @@ class Vehicle:
     # Reset function for when a vehicle has reached their goal.
     def reset(self):
         self.goal = Vec2(self.pos.x, self.pos.y)
-        self.path.clear()
+        #self.path.clear()
         self.rent_thread = threading.Thread()
         self.start_time = 0
         self.end_time = 0
@@ -150,46 +145,32 @@ class Vehicle:
         if self.pos.dist(self.goal) < 0.01:
             return
 
-        # Do not update until renting is complete.
-        if self.rent_thread.is_alive():
-            return       
-
         # Do not move if 'done'
         if self.done:
             return
-
-        # Set the start and end time as well as path.
-        if self.start_time == 0:
-            self.start_time = time.time()
-            self.end_time = self.start_time + self.time_per_cell * len(self.path)
-            self.path = self.rented_path.copy()       
-        
-        # Clear rented_path if time has expired.
-        if time.time() > self.end_time:
-            self.rented_path.clear()
-            self.done = True
-
+               
         # Check if nodes have been exchanged.
         for cell in self.rented_path:
-            if not [cell.x, cell.y, 0] in self.peer.free_nodes and not cell in self.path:
+            if not cell.checkRented():
+                del self.rented_path[self.rented_path.index(cell)]
+            elif not [cell.x, cell.y, 0] in self.peer.free_nodes and not Vec2(cell.x, cell.y) in self.path:
                 del self.rented_path[self.rented_path.index(cell)]
 
+    
         # Move and transmit positional information.
         self.move(dt)        
         
         message = pickle.dumps([self.pos.x, self.pos.y])       
         sent = self.sender.send(pickle.dumps([self.pos.x, self.pos.y]))
-        #print('Vehicle sent: ',end='')
-        #print(pickle.loads(message[:sent]))
         self.sender.recv(1024)        
 
     # Move towards goal, adjust movement if outside of path.
     def move(self, dt):        
 
-        #if len(self.path) <= 1:
-        #    # If the path is empty and the vehicle is not at the goal, stop.
-        #    if not self.get_cellP(self.goal) == self.pos:
-        #        return       
+        if len(self.path) <= 1:
+            # If the path is empty and the vehicle is not at the goal, stop.
+            if not self.get_cellP(self.goal) == self.cell:
+                return       
         
         diff = self.goal - self.pos
 
@@ -210,13 +191,9 @@ class Vehicle:
         
         self.adjust_movement(mvmt.x, mvmt.y)
 
-        final_mvmt = self.pos - pos_copy
-        #print('Vehicle moved: ',end='')
-        #print(final_mvmt)
-
         if dist_to_goal < 0.1:
             for cell in self.path:
-                self.peer.free_nodes.append([cell.x, cell.y, 0])
+                self.peer.free_nodes.append([cell.x, cell.y, 0])                
                 del self.path[self.path.index(cell)]
             self.done = True
             self.reset()
@@ -317,10 +294,10 @@ class Vehicle:
             self.path.append(Vec2(current_cell_x, current_cell_y))
         
         # Attempt to rent the calculated path.
-        self.rent_thread = threading.Thread(target=self.peer.rent_path, args=(self.rented_path, self.path, self.time_per_cell * len(self.path),))
+        self.rent_thread = threading.Thread(target=self.peer.rent_path, args=(self.rented_path, self.path, self.time_per_cell,))
         self.rent_thread.daemon = True
-        self.rent_thread.start()      
-
+        self.rent_thread.start()
+        self.path.clear()
         return self.path   
     
     # Override the path.

@@ -17,11 +17,24 @@ color_mapping.append("brown")
 color_mapping.append("yellow")
 color_mapping.append("plum")
 
+class RentedNode:
+    def __init__(self, x, y, z, endTime):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.endTime = endTime
+    def checkRented(self):
+        return self.endTime > time.time()
+    def __str__(self):
+        return '(' + str(self.x) + ', ' + str(self.y) + ', ' + str(self.z) + ')'
+    def __repr__(self):
+        return '(' + str(self.x) + ', ' + str(self.y) + ', ' + str(self.z) + ')'
+
 class Peer:
     def __init__(self, index):
         self.index = index
 
-        self.web3contract = contracts.Web3Contract('0xf556B1FD9Eb18cb8E3ad3BfdF1Bb069359fC38b5', self.index)
+        self.web3contract = contracts.Web3Contract('0x92ce6a4723d8F0D84ef3Aee87fb082Edb9592D2e', self.index)
 
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind(('127.0.0.' + str(index + 1), index + 1))
@@ -66,17 +79,20 @@ class Peer:
                     # Check if the node is in the list of free (passed) nodes.
                     if node in self.free_nodes:
                         if exchange:
-                            #print('Attempting to exchange node: ' + str(node) + ' to ' + self.web3contract.address_from_id(sender) + ' from ' + self.web3contract.address_from_id(self.index))
-                            self.web3contract.exchange_node(node[0], node[1], node[2], self.web3contract.address_from_id(sender))
+                            # Building and signing a transaction of the owner change and sending it over the socket.
+                            signed_tx = self.web3contract.exchange_node(node[0], node[1], node[2], self.web3contract.address_from_id(sender))
                             del self.free_nodes[self.free_nodes.index(node)]
+                            conn.send(signed_tx)
                         conn.send(b'1')
                         info = info + (' SUCCESS')                       
                     # If node is not passed, it will not be exchanged.       
                     else:
                         conn.send(b'0')
-                        info = info + (' FAILURE')
-                    if exchange:
-                        print(info)
+                        info = info + (' FAILURE ')
+                        #info = info + ' Free nodes: ' + str(self.free_nodes)
+                        remaining_time = self.web3contract.contract.functions.GetRemainingTime(node[0], node[1], node[2]).call()
+                        info = info + str(remaining_time)
+                    print(info)
                     conn.close()
                     break  
     
@@ -112,6 +128,9 @@ class Peer:
         self.client.close()
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         
+        if response == b'':
+            return False
+
         # Return the response.
         return bool(int(response))
     
@@ -129,22 +148,23 @@ class Peer:
         except:
             return False
 
-        if response == b'':
+        if response == b'' or response == b'0':
             return False
 
         self.client.close()
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        # Check if the exchange was successful.
-        if bool(int(response)):
-            # If the remaining time of the rental was not enough, add more time.
-            remaining_time = self.web3contract.contract.functions.GetRemainingTime(x, y, z).call()
-            if remaining_time < seconds:
-                tx_hash = self.web3contract.contract.functions.AddTimeToRental(x, y, z, seconds - remaining_time).transact()
-                self.web3contract.web3.eth.waitForTransactionReceipt(tx_hash)
-            return True                  
-        else:
-            return False
+        # Publish the transaction stating the owner change, having the transaction signed as a guarantee.
+        tx = response
+        tx_hash = self.web3contract.web3.eth.sendRawTransaction(tx)
+        self.web3contract.web3.eth.waitForTransactionReceipt(tx_hash)
+
+        remaining_time = self.web3contract.contract.functions.GetRemainingTime(x, y, z).call()
+        if remaining_time < seconds:
+            tx_hash = self.web3contract.contract.functions.AddTimeToRental(x, y, z, seconds - remaining_time).transact()
+            self.web3contract.web3.eth.waitForTransactionReceipt(tx_hash)
+        return True
+        
     
     # Return rented nodes in case of failure in full path rental.
     def return_nodes(self, path):
@@ -162,8 +182,9 @@ class Peer:
 
 
     # Attempts to rent the nodes in path for given amount of time.
-    def rent_path(self, rented_path, path, seconds):
+    def rent_path(self, rented_path, moving_path, seconds):
         rented = False
+        path = moving_path.copy()
 
         while not rented:           
             available = True
@@ -177,12 +198,13 @@ class Peer:
                 if not self.web3contract.contract.functions.CheckAvailable(x, y, z).call():
                     # Ask owner if node might be exchanged.
                     if not self.status_check(x, y, z):
+                        available = False
                         break
 
             if available:
                 # Rent path.
                 rented = True
-                #print('Trying to rent...')
+
                 for cell in path:
                     x = int(cell.x)
                     y = int(cell.y)
@@ -191,40 +213,22 @@ class Peer:
                     cell_success = True
                     # Rent normally if available.
                     if self.web3contract.contract.functions.CheckAvailable(x, y, z).call():
-                        if self.web3contract.rent_node(x, y, z, abs(seconds)):
-                            rented_path.append(cell)
-                            #print('Rented: ' + str(cell))
-                        else:
+                        if not self.web3contract.rent_node(x, y, z, abs(seconds)):                        
                             cell_success = False
-
                     # Attempt exchange if not available.
-                    elif self.exchange(x, y, z, seconds):
-                        rented_path.append(cell)
-                        #print('Exchanged: ' + str(cell))
-                    # Stop if failure.
+                    elif not self.exchange(x, y, z, seconds):
+                        cell_success = False                    
+                    # Append cell to rented path if success.
+                    if cell_success:
+                        rented_path.append(RentedNode(x, y, z, time.time()+seconds))
+                        moving_path.append(cell)
+                        del cell
+                    # Break otherwise
                     else:
-                        cell_success = False
-                    
-                    # Return rented nodes if any node in path fails.
-                    if not cell_success:
                         rented = False
-                        print('Failed to rent: ' + str(cell))
-                        address = self.web3contract.contract.functions.GetOwner(x,y,z).call()
-                        sockname = self.web3contract.sockname_from_address(address)
-                        try:
-                            print('Owner is: ' + color_mapping[int(sockname[0][len(sockname[0])-1]) - 1])
-                        except:
-                            print('---------------------')
-                            print(sockname)
-                            print('---------------------')
-                        result = self.return_nodes(rented_path)
-                        if not result:
-                            print('failed in returning path')
-                        rented_path.clear()
                         break
 
             if rented:
-                #print('Full path rented.')
                 return
             #else:
             #    time.sleep(10) # Wait 10s to try again if failed.

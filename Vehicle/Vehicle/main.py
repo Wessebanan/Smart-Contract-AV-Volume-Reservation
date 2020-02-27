@@ -17,8 +17,8 @@ def main(args):
     frame_start = time.time()
 
     while True:
-        if vehicle.done:
-            break
+        #if vehicle.done:
+        #    break
         if frame_time < 1 / 30:
             frame_time = time.time() - frame_start
         else:

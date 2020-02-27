@@ -3,6 +3,7 @@ import vehicle
 import math
 import os
 import threading
+import time
 
 import json
 from web3 import Web3
@@ -58,7 +59,7 @@ class Simulation:
 
         # Contract (for coloring)
         url = "http://127.0.0.1:8545"
-        address = '0xf556B1FD9Eb18cb8E3ad3BfdF1Bb069359fC38b5'
+        address = '0x92ce6a4723d8F0D84ef3Aee87fb082Edb9592D2e'
         self.web3 = Web3(Web3.HTTPProvider(url))
 
         cd_path = os.path.dirname(__file__)
@@ -111,9 +112,12 @@ class Simulation:
 
             # Create a new graphical vehicle object and store it in the list.
             self.vehicles.append(vehicle.GraphicalVehicle(n_vehicles, color_mapping[n_vehicles], self.win))
-
+            
             # Fire up a new instance of the vehicle program.
-            self.vehicle_threads.append(threading.Thread(target=os.system, args=('cmd /c python ../../Vehicle/Vehicle/main.py ' + str(n_vehicles),)))
+            cd_path = os.path.dirname(__file__)
+            file_path = os.path.join(cd_path, '../../Vehicle/Vehicle/main.py ')
+
+            self.vehicle_threads.append(threading.Thread(target=os.system, args=('cmd /c python ' + file_path + str(n_vehicles),)))
             self.vehicle_threads[len(self.vehicle_threads)-1].daemon = True
             self.vehicle_threads[len(self.vehicle_threads)-1].start()
     
@@ -150,4 +154,21 @@ class Simulation:
                     self.grid[x][y].setFill(cell.color)
                 y = y + 1
             x = x + 1
+        #red_index = int(time.time()) % 2
+        #yel_index = abs(red_index - 1)
+
+        #colors = []
+        #colors.insert(red_index, "red")
+        #colors.insert(yel_index, "yellow")
+        #x = 0
+        #for col in self.grid:
+        #    y = 0
+        #    for cell in col:  
+        #        if (x+y)%2==0:
+        #            cell.setFill(colors[0])
+        #        else:
+        #            cell.setFill(colors[1])
+        #        y += 1
+        #    x += 1
+
 

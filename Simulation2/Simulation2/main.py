@@ -41,13 +41,7 @@ def spawn_vehicles(sim, amount):
 
         i+=1
 
-def thread_counter():
-    while True:
-        print(threading.active_count())
-
 def main():
-    #threading.Thread(target=thread_counter).start()
-
     # Create window and set coordinate system.
     size_x = 1000
     size_y = 1000
