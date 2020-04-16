@@ -6,25 +6,41 @@ import sys
 
 random.seed(time.time())
 
+'''
+MODES (args[2]):
+0: Regular, all restricitons.
+1: Always exchange.
+2: No reservations.
+3: Straight line.
+'''
+
 
 def main(args):
-    if len(args) < 2:
-        i = 0
-    else:
-        i = int(args[1])  
-
-    vehicle = Vehicle.Vehicle(0, 0, i)
-
-    # Static frame time to save performance 
-    # (being a separate process taking as much performance as possible)s
+    i = 0
+    mode = 0
+    amount = 0
+    if len(args) >= 2:
+        i = int(args[1])
+        if len(args) >= 3:
+            mode = int(args[2])
+            if len(args) == 4:
+                amount = args[3]
+            
+    vehicle = Vehicle.Vehicle(0, 0, i, mode, amount)
+  
     frame_time = 0.1
-    
+
     while True:
         time.sleep(frame_time)
-        try:
-            vehicle.update(frame_time)            
-        except:
+        
+        vehicle.update(frame_time) 
+
+        # Kill the process if the vehicle has no nodes to exchange and has reached its destination.
+        if len(vehicle.rented_path) == 0 and vehicle.done:
+            vehicle.update(frame_time) 
+            #print(i, 'dead')
             return
+            
 
 
 if __name__ == '__main__':

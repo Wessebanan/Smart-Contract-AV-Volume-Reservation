@@ -26,7 +26,7 @@ color_mapping = {}
 with open(account_list_path) as account_list:
     contents = account_list.readlines()
     for i in range(0, int(len(contents) / 2)):
-        color_mapping[contents[i*2]] = colors[i]
+        color_mapping[contents[i*2].rstrip('\n')] = colors[i]
 
 class RentedNode:
     def __init__(self, x, y, z, endTime):
@@ -42,10 +42,13 @@ class RentedNode:
         return '(' + str(self.x) + ', ' + str(self.y) + ', ' + str(self.z) + ')'
 
 class Peer:
-    def __init__(self, index):
+    def __init__(self, index, mode):
+
+        self.mode = mode
+
         self.index = index
 
-        self.web3contract = contracts.Web3Contract(self.index)
+        self.web3contract = contracts.Web3Contract(self.index, self.mode)
 
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -53,12 +56,14 @@ class Peer:
         self.port = index + 1
         self.server.bind((self.ip, self.port))
         self.server_thread = threading.Thread(target=self.server_function)
-        
+        self.server_thread.daemon = True
         self.server_thread.start()
 
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         self.free_nodes = []
+
+        self.lock = threading.Lock()
 
     # Listens to incoming connections regarding node exchange.
     def server_function(self):
@@ -99,7 +104,9 @@ class Peer:
                     if node in self.free_nodes:
                         if exchange:
                             # Building and signing a transaction of the owner change and sending it over the socket.
+                            self.lock.acquire()
                             signed_tx = self.web3contract.exchange_node(node[0], node[1], node[2], sender, ip, port)
+                            self.lock.release()
                             del self.free_nodes[self.free_nodes.index(node)]
                             conn.send(signed_tx)
                         conn.send(b'1')
@@ -108,18 +115,21 @@ class Peer:
                     else:
                         conn.send(b'0')
                         info = info + (' FAILURE ')
-                    print(info)
+                        info = info + ( 'Free nodes: ' + str(self.free_nodes))
+                    #print(info)
                     conn.close()
-                    break  
+                    break
+                break
     
     # Connects to specified socket (sockname = (ip: str, port: int)
     # and sends a request [id, x, y, z, exchange/check true/false]
     def message(self, sockname, message):    
         try:
             self.client.connect(sockname)  
-        except:
-            print('Could not contact about node: ' + str(message[:3]))
-            print(sockname)
+        except Exception as e:
+            #print('Could not contact about node: ' + str(message[:3]))
+            #print(sockname)
+            #print(e)
             return
         message.insert(0, self.web3contract.web3.eth.defaultAccount)
         self.client.send(pickle.dumps(message)) 
@@ -154,7 +164,10 @@ class Peer:
     def exchange(self, x, y, z, seconds):
         owner = self.web3contract.get_owner(x, y, z)
         owner_address = owner.address
-        if owner_address == self.web3contract.web3.eth.defaultAccount:                        
+
+        if owner_address == self.web3contract.web3.eth.defaultAccount:
+            self.client.close()
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             return True
 
         # Ask owner to exchange the node.
@@ -164,26 +177,31 @@ class Peer:
         try:
             response = self.client.recv(1024)
         except:
+            self.client.close()
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             return False
 
         if response == b'' or response == b'0':
+            self.client.close()
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             return False
 
         self.client.close()
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         # Starting a thread that attempts to publish the transaction until it succeeds.
-        threading.Thread(target=self.web3contract.send_transaction, args=(response,)).start()
-
-        desired_end_time = int(time.time()) + seconds
-        end_time = self.web3contract.get_end_time(x, y, z)
+        publish_thread = threading.Thread(target=self.web3contract.send_transaction, args=(response,))
+        publish_thread.daemon = True
+        publish_thread.start()
+        #desired_end_time = int(time.time()) + seconds
+        #end_time = self.web3contract.get_end_time(x, y, z)
         
-        time_to_add = desired_end_time - end_time
-        if time_to_add > 0:
-            result = self.web3contract.add_time(x, y, z, time_to_add)
-
-            if not result:
-                print('Could not add time to rental.')
+        #time_to_add = desired_end_time - end_time
+        #if time_to_add > 0:
+        #    try:
+        #        self.web3contract.add_time(x, y, z, time_to_add)
+        #    except:            
+        #        print('Could not add time to rental.')
 
         return True       
 
@@ -211,40 +229,65 @@ class Peer:
         rented = False
         path = moving_path.copy()
 
+        if self.mode == 0:
+            cd = os.path.dirname(__file__)
+            fail_path = os.path.join(cd, '../../Tests/logs/failures.txt')
+            fail_file = open(fail_path, "a")
+            success_path = os.path.join(cd, '../../Tests/logs/successes.txt')
+            success_file = open(success_path, "a")
+
         while not rented:          
             
             # Rent path.
             rented = True
             
             start_time = int(time.time())
-            end_time = start_time + seconds
-            
+            end_time = start_time + seconds            
+
             for cell in path:
                 x = int(cell.x)
                 y = int(cell.y)
                 z = 0
-            
+                cell_start = time.time()
                 cell_success = True
+
                 # Rent normally if available.
                 if self.web3contract.check_available(x, y, z, start_time, end_time):
-                    if not self.web3contract.rent_node(x, y, z, start_time, int(seconds), self.ip, self.port):                        
+                    self.lock.acquire()
+                    success = self.web3contract.rent_node(x, y, z, start_time, int(seconds), self.ip, self.port)
+                    self.lock.release()
+
+                    if not success:                        
                         cell_success = False
+
                 # Attempt exchange if not available.
-                elif not self.exchange(x, y, z, seconds):
-                    cell_success = False                    
+                elif not self.exchange(x, y, z, seconds) and not self.mode == 1:
+                    cell_success = False            
+                    
                 # Append cell to rented path if success.
                 if cell_success:
+                    if self.mode == 0:
+                        success_file.write(str(time.time()-cell_start) + '\n')
                     rented_path.append(RentedNode(x, y, z, time.time()+seconds))
                     moving_path.append(cell)
-                    del cell
+                    
                 # Break otherwise
                 else:
+                    if self.mode == 0:
+                        fail_file.write(str(time.time()-cell_start) + '\n')
                     rented = False
                     break
+            
+            # Clear rented nodes from path.
+            for node in rented_path:
+                for cell in path:
+                    if node.x == cell.x and node.y == cell.y:
+                        del path[path.index(cell)]
 
             # Thread is done if full path was rented.
             if rented:
                 return
+
             # Sleep for a bit to avoid excessive calls.
-            else:
-                time.sleep(10)
+            else:                
+                time.sleep(5)

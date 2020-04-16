@@ -1,8 +1,11 @@
 import socket
 import threading
 import pickle
+import time
 
 import graphics
+
+POS_SIZE = 26
 
 class GraphicalVehicle:
     def __init__(self, index, color, win):
@@ -22,17 +25,15 @@ class GraphicalVehicle:
         self.receiver_thread = threading.Thread(target=self.receiver_function)
         self.receiver_thread.daemon = True
         self.receiver_thread.start()
-
-        self.pos_queue = []
+        
+        self.new_pos = [-20, -20]
 
     def update(self):
-        if len(self.pos_queue) != 0:
-            pos = self.pos_queue[0]
-            mvmt_x = pos[0] - self.circle.getCenter().getX()
-            mvmt_y = pos[1] - self.circle.getCenter().getY()
-
-            self.circle.move(mvmt_x, mvmt_y)
-            del self.pos_queue[0]
+        mvmt_x = self.new_pos[0] - self.circle.getCenter().getX()
+        mvmt_y = self.new_pos[1] - self.circle.getCenter().getY()
+        
+        # Moving the circle according to the most recent position received.
+        self.circle.move(mvmt_x, mvmt_y)
 
     def receiver_function(self):
         while True:
@@ -41,14 +42,17 @@ class GraphicalVehicle:
                 conn, addr = self.receiver.accept()
                 while True:
                     try:
-                        data = conn.recv(4096)
+                        data = bytearray()                       
+                        while len(data) < POS_SIZE:
+                            packet = conn.recv(POS_SIZE - len(data))
+                            if not packet:
+                                return
+                            data.extend(packet)
                         conn.send(b'1')
-                    except:
+                    except Exception as e:
                         return
-                    length = len(data)
-                    if length == 26:
-                        message = pickle.loads(data)
+                    
+                    message = pickle.loads(data)
 
-                        pos_x = message[0]
-                        pos_y = message[1]
-                        self.pos_queue.append([pos_x, pos_y])
+                    # Overwriting the new pos with the newest pos.
+                    self.new_pos = message

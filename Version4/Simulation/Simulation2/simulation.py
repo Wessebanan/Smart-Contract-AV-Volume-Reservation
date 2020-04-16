@@ -3,9 +3,11 @@ import os
 import threading
 import time
 import json
+import subprocess
 
 import graphics
 from web3 import Web3
+from web3.middleware import geth_poa_middleware
 
 import vehicle
 
@@ -31,7 +33,10 @@ color_mapping = {}
 with open(account_list_path) as account_list:
     contents = account_list.readlines()
     for i in range(0, int(len(contents) / 2)):
-        color_mapping[contents[i*2]] = colors[i]
+        color_mapping[contents[i*2].rstrip('\n')] = colors[i]
+
+RENT_NODE_INPUT = 7
+CHANGE_OWNER_INPUT = 6
 
 class CellColor:
     def __init__(self, x, y, color, end_time):
@@ -50,7 +55,7 @@ class Simulation:
         self.win = graphics.GraphWin("Grid", win_size_x, win_size_y)
         self.win.setCoords(0, 0, win_size_x, win_size_y)
         self.win.setBackground("white")
-
+        
         # Grid
         self.grid_size_x = grid_size_x
         self.grid_size_y = grid_size_y
@@ -76,6 +81,7 @@ class Simulation:
         # Setup connection to smart contract at @param address with locally stored abi.
         url = "http://127.0.0.1:" + str(self.port)
         self.web3 = Web3(Web3.HTTPProvider(url))
+        self.web3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.web3.eth.defaultAccount = self.web3.eth.accounts[0]
 
         cd_path = os.path.dirname(__file__)
@@ -108,7 +114,7 @@ class Simulation:
         self.color_path()
 
     # Add a vehicle to the list of vehicles.
-    def add_vehicle(self):
+    def add_vehicle(self, mode, amount):
         n_vehicles = len(self.vehicles)
         if n_vehicles < 10:
 
@@ -117,11 +123,17 @@ class Simulation:
 
             # Fire up a new instance of the vehicle program.
             cd_path = os.path.dirname(__file__)
-            file_path = os.path.join(cd_path, '../../Vehicle/Vehicle/main.py ')
+            file_path = os.path.join(cd_path, '..\\..\\Vehicle\\Vehicle\\main.py ')
 
-            self.vehicle_threads.append(threading.Thread(target=os.system, args=('cmd /c python ' + file_path + str(n_vehicles),)))
-            self.vehicle_threads[len(self.vehicle_threads)-1].daemon = True
-            self.vehicle_threads[len(self.vehicle_threads)-1].start()
+            #p = subprocess.Popen('start '+ file_path + str(n_vehicles), shell=True)
+            #self.vehicle_threads.append(p)
+            
+            t = threading.Thread(target=os.system, args=('cmd /c python3 ' + file_path + str(n_vehicles) + ' ' + str(mode) + ' ' + str(amount),))
+            t.daemon = True
+            t.start()
+            self.vehicle_threads.append(t)
+
+
 
     # Create a grid of rectangles based on the objects members.
     def init_grid(self):
@@ -154,7 +166,7 @@ class Simulation:
         # Check contract for changes.
         if not self.current_block == int(self.web3.eth.blockNumber):
             block = self.web3.eth.getBlock('latest')
-            
+            self.current_block = int(self.web3.eth.blockNumber)
             # If the block is not empty, check the transactions for changes.
             if not len(block.transactions) == 0:
                 for tx in block.transactions:                   
@@ -172,23 +184,32 @@ class Simulation:
                         y = tx_input['_y']
                         z = tx_input['_z']
 
-                        # Get the time interval to determine the end time.
-                        start = tx_input['_start']
-                        duration = tx_input['_duration']            
-                        if start < block.timestamp:
-                            start = block.timestamp
-                        end_time = start + duration
-                        
-                        # Get the owner from the tx information to map color.
-                        owner = tx_info['from']
-            
-                        # Update the color of the cell.
-                        cell = self.color_grid[x][y]                       
-                        color = color_mapping[owner]
-                        if not cell.color == color:
+                        # Getting owner and end time based on if regular rental or owner change.
+                        owner = ''
+                        end_time = 0
+
+                        if len(tx_input) == 7: # Rent Node.
+                            start = tx_input['_start']
+                            duration = tx_input['_duration']            
+                            if start < block.timestamp:
+                                start = block.timestamp
+
+                            end_time = start + duration
+                            owner = tx_info['from']
+
+                        else:
+                            end_time = self.contract.functions.GetEndTime(x, y, z).call() # Add Time and Change Owner.
+                            if len(tx_input) == 6: # Change Owner.
+                                owner = tx_input['_newOwner']
+
+                        # Update end time of cell rental.
+                        self.color_grid[x][y].end_time = end_time
+
+                        if not owner == '':
+                            # Update the color of the cell.                                             
+                            color = color_mapping[owner]
                             self.color_grid[x][y].color = color
                             self.color_grid[x][y].changed = True
-                            self.color_grid[x][y].end_time = end_time
 
         # Change colors of cells where necessary.
         x = 0
